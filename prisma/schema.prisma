@@ -1,0 +1,941 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── USER & AUTH ───────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  fullName  String?
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  settings        UserSettings?
+  contacts        Contact[]
+  properties      Property[]
+  transactions    Transaction[]
+  tasks           Task[]
+  documents       Document[]
+  expenses        Expense[]
+  incomeRecords   IncomeRecord[]
+  taxProfile      TaxProfile?
+  cnssProfile     CNSSProfile?
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+model UserSettings {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Business
+  businessName      String   @default("Mon Agence")
+  legalStatus       String   @default("auto_entrepreneur")
+  activity          String   @default("Agences immobilières et administration de biens immobiliers")
+  patente           String?
+  rc                String?
+  ice               String?
+  if_number         String?
+  cnss_number       String?
+
+  // Location
+  city              String   @default("Tanger")
+  country           String   @default("MA")
+  timezone          String   @default("Africa/Casablanca")
+  currency          String   @default("MAD")
+  language          String   @default("fr")
+
+  // Commission defaults
+  defaultSaleCommissionRate    Float  @default(0.025) // 2.5%
+  defaultRentalCommissionRate  Float  @default(1.0)   // 1 month
+  defaultCommissionPayer       String @default("both")
+
+  // Notifications
+  emailNotifications           Boolean @default(true)
+  notificationEmail            String?
+  reminderDays                 Int[]   @default([7, 3, 1])
+
+  // Theme
+  theme                        String @default("system")
+
+  // Onboarding
+  onboardingCompleted          Boolean @default(false)
+  onboardingStep               Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_settings")
+}
+
+// ─── CONTACTS / CRM ────────────────────────────────────────────────────────────
+
+model Contact {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Identity
+  firstName   String
+  lastName    String
+  fullName    String   // denormalized for search
+  phone       String?
+  whatsapp    String?
+  email       String?
+  city        String?
+  language    String   @default("fr")
+
+  // Classification
+  contactType ContactType
+  leadSource  String?
+  status      ContactStatus @default(NEW)
+  tags        String[]
+
+  // Qualification
+  buyerBudgetMin        Float?
+  buyerBudgetMax        Float?
+  buyerPropertyType     String[]
+  buyerNeighborhoods    String[]
+  buyerSurfaceMin       Float?
+  buyerSurfaceMax       Float?
+  buyerBedrooms         Int?
+  buyerFurnished        String?    // "furnished" | "unfurnished" | "any"
+  buyerTitledRequired   Boolean?
+  buyerFinancing        String?    // "cash" | "bank" | "both"
+  buyerIntendedUse      String?    // "residence" | "investment"
+  buyerExpectedDate     DateTime?
+  buyerNotes            String?
+
+  sellerAskingPrice     Float?
+  sellerMinPrice        Float?
+  sellerDocStatus       String?
+  sellerReason          String?
+  sellerUrgency         String?
+  sellerMandateStatus   String?
+
+  tenantBudgetMin       Float?
+  tenantBudgetMax       Float?
+  tenantPropertyType    String?
+  tenantFurnished       String?
+  tenantMoveInDate      DateTime?
+  tenantDuration        String?
+
+  landlordRentalPrice   Float?
+  landlordConditions    String?
+
+  // Score
+  leadScore             Int     @default(0)
+
+  // Notes
+  notes                 String?
+  assignedTo            String? // future multi-agent
+
+  // Soft delete
+  deletedAt             DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  interactions    ContactInteraction[]
+  properties      Property[]           @relation("PropertyOwner")
+  transactions    Transaction[]        @relation("TransactionBuyer")
+  transactionsSeller Transaction[]     @relation("TransactionSeller")
+  tasks           Task[]
+
+  @@index([userId, status])
+  @@index([userId, contactType])
+  @@index([userId, deletedAt])
+  @@index([fullName])
+  @@map("contacts")
+}
+
+enum ContactType {
+  BUYER
+  SELLER
+  TENANT
+  LANDLORD
+  INVESTOR
+  AGENCY
+  NOTARY
+  PARTNER
+  OTHER
+}
+
+enum ContactStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  ACTIVE
+  NEGOTIATION
+  CLOSED_WON
+  CLOSED_LOST
+  INACTIVE
+}
+
+model ContactInteraction {
+  id          String   @id @default(uuid())
+  contactId   String
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  type        String   // "call" | "email" | "whatsapp" | "visit" | "meeting" | "note"
+  summary     String
+  outcome     String?
+  nextAction  String?
+  nextDate    DateTime?
+
+  createdAt   DateTime @default(now())
+
+  @@index([contactId])
+  @@map("contact_interactions")
+}
+
+// ─── PROPERTIES ────────────────────────────────────────────────────────────────
+
+model Property {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  reference   String   // auto-generated
+  title       String
+  description String?
+
+  // Type & transaction
+  propertyType    PropertyType
+  transactionType TransactionType[]
+
+  // Location
+  neighborhood  String?
+  address       String?
+  city          String   @default("Tanger")
+  latitude      Float?
+  longitude     Float?
+
+  // Details
+  price         Float
+  surface       Float?
+  bedrooms      Int?
+  bathrooms     Int?
+  floor         Int?
+  totalFloors   Int?
+  furnished     String?  // "furnished" | "unfurnished" | "optional"
+  condition     String?  // "new" | "good" | "needs_work" | "renovation"
+
+  // Legal
+  legalStatus   LegalStatus @default(PENDING_VERIFICATION)
+  titreFoncier  String?
+  otherDocs     String?
+
+  // Status
+  status        PropertyStatus @default(NEW)
+
+  // Owner
+  ownerId       String?
+  owner         Contact?  @relation("PropertyOwner", fields: [ownerId], references: [id])
+
+  // Media
+  photos        String[]
+  videoUrl      String?
+
+  deletedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  mandate       Mandate?
+  transactions  Transaction[]
+  documents     Document[]
+  tasks         Task[]
+
+  @@index([userId, status])
+  @@index([userId, propertyType])
+  @@index([userId, deletedAt])
+  @@map("properties")
+}
+
+enum PropertyType {
+  APARTMENT
+  HOUSE
+  VILLA
+  RIAD
+  STUDIO
+  DUPLEX
+  COMMERCIAL
+  LAND
+  PARKING
+  OTHER
+}
+
+enum TransactionType {
+  SALE
+  RENTAL
+}
+
+enum LegalStatus {
+  TITLED
+  UNTITLED
+  DOCUMENTS_INCOMPLETE
+  PENDING_VERIFICATION
+  VERIFIED
+}
+
+enum PropertyStatus {
+  NEW
+  UNDER_VERIFICATION
+  ACTIVE
+  RESERVED
+  UNDER_NEGOTIATION
+  SOLD
+  RENTED
+  WITHDRAWN
+  EXPIRED
+}
+
+model Mandate {
+  id          String   @id @default(uuid())
+  propertyId  String   @unique
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  type        TransactionType
+  exclusive   Boolean  @default(false)
+  startDate   DateTime
+  expiryDate  DateTime
+  askingPrice Float
+  minPrice    Float?
+  commissionRate      Float?
+  commissionAmount    Float?
+  commissionPayer     String?
+  agreementDoc        String?
+  status      MandateStatus @default(ACTIVE)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([expiryDate])
+  @@map("mandates")
+}
+
+enum MandateStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  COMPLETED
+}
+
+// ─── TRANSACTIONS ──────────────────────────────────────────────────────────────
+
+model Transaction {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  reference   String
+  type        TransactionType
+
+  // Parties
+  buyerId     String?
+  buyer       Contact? @relation("TransactionBuyer", fields: [buyerId], references: [id])
+  sellerId    String?
+  seller      Contact? @relation("TransactionSeller", fields: [sellerId], references: [id])
+  propertyId  String?
+  property    Property? @relation(fields: [propertyId], references: [id])
+  agencyName  String?
+
+  // Financials
+  transactionValue    Float
+  agreedCommission    Float
+  commissionMethod    String  @default("percentage") // "percentage" | "fixed"
+  commissionRate      Float?
+  commissionPayer     String  @default("both") // "buyer" | "seller" | "both" | "agency"
+  agentShare          Float?
+  agencyShare         Float?
+
+  // Status
+  status              TransactionStatus @default(LEAD)
+  stage               String?
+
+  // Dates
+  agreementDate       DateTime?
+  contractDate        DateTime?
+  completionDate      DateTime?
+
+  // Notes & docs
+  notes               String?
+
+  deletedAt           DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  commission          Commission?
+  stages              TransactionStage[]
+  documents           Document[]
+  tasks               Task[]
+
+  @@index([userId, status])
+  @@index([userId, type])
+  @@index([userId, deletedAt])
+  @@map("transactions")
+}
+
+enum TransactionStatus {
+  LEAD
+  QUALIFIED
+  PROPERTY_PROPOSED
+  VISIT_SCHEDULED
+  OFFER_SUBMITTED
+  NEGOTIATION
+  AGREEMENT
+  CONTRACT_SIGNED
+  COMPLETED
+  CANCELLED
+  LOST
+}
+
+model TransactionStage {
+  id            String      @id @default(uuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  stage         String
+  notes         String?
+  enteredAt     DateTime    @default(now())
+
+  @@map("transaction_stages")
+}
+
+// ─── COMMISSIONS ──────────────────────────────────────────────────────────────
+
+model Commission {
+  id            String      @id @default(uuid())
+  transactionId String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  userId        String
+
+  totalAgreed       Float
+  totalEarned       Float    @default(0)
+  totalInvoiced     Float    @default(0)
+  totalCollected    Float    @default(0)
+  totalOutstanding  Float    @default(0)
+  status            CommissionStatus @default(EXPECTED)
+
+  invoiceNumber     String?
+  invoiceDate       DateTime?
+  invoiceDoc        String?
+  notes             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments  CommissionPayment[]
+
+  @@index([userId, status])
+  @@map("commissions")
+}
+
+enum CommissionStatus {
+  EXPECTED
+  INVOICED
+  PARTIAL
+  COLLECTED
+  OVERDUE
+  DISPUTED
+  CANCELLED
+}
+
+model CommissionPayment {
+  id            String     @id @default(uuid())
+  commissionId  String
+  commission    Commission @relation(fields: [commissionId], references: [id], onDelete: Cascade)
+
+  amount        Float
+  date          DateTime
+  paymentMethod String     // "cash" | "transfer" | "cheque" | "other"
+  payer         String?
+  reference     String?
+  notes         String?
+  receiptDoc    String?
+
+  createdAt     DateTime   @default(now())
+
+  @@map("commission_payments")
+}
+
+// ─── FINANCE ───────────────────────────────────────────────────────────────────
+
+model IncomeRecord {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        String   // "commission" | "other"
+  description String
+  amount      Float
+  date        DateTime
+  paymentMethod String  // "cash" | "transfer" | "cheque" | "other"
+  payer       String?
+  relatedTransactionId String?
+  invoiceNumber String?
+  withholdingTax Float?
+  withholdingTaxDoc String?
+  notes       String?
+  document    String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, date])
+  @@map("income_records")
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  category    ExpenseCategory
+  description String
+  amount      Float
+  date        DateTime
+  paymentMethod String  @default("cash")
+  supplier    String?
+  receipt     String?
+  relatedTransactionId String?
+  taxDeductible Boolean @default(false)
+  notes       String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, date])
+  @@index([userId, category])
+  @@map("expenses")
+}
+
+enum ExpenseCategory {
+  FUEL
+  TRANSPORT
+  PHONE
+  INTERNET
+  ADVERTISING
+  PHOTOGRAPHY
+  VIDEO
+  SOFTWARE
+  OFFICE
+  PROFESSIONAL_SERVICES
+  BANK_FEES
+  CNSS_AMO
+  TAX_PAYMENT
+  OTHER
+}
+
+// ─── TAX ───────────────────────────────────────────────────────────────────────
+
+model TaxProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  legalStatus       String  @default("auto_entrepreneur")
+  activityCategory  String  @default("services")
+  declarationFrequency String @default("quarterly") // "monthly" | "quarterly"
+  taxYear           Int     @default(2024)
+  annualCeilingMAD  Float   @default(500000)
+  applicableRate    Float   @default(0.01)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  declarations      TaxDeclaration[]
+  payments          TaxPayment[]
+  withholdingRecords WithholdingRecord[]
+
+  @@map("tax_profiles")
+}
+
+model TaxDeclaration {
+  id          String     @id @default(uuid())
+  taxProfileId String
+  taxProfile  TaxProfile @relation(fields: [taxProfileId], references: [id], onDelete: Cascade)
+
+  period          String   // "2024-Q1" | "2024-01"
+  periodLabel     String
+  declaredTurnover Float
+  calculatedTax   Float
+  declaredTax     Float?
+  dueDate         DateTime
+  declaredAt      DateTime?
+  status          String   @default("pending") // "pending" | "declared" | "late"
+  reference       String?
+  notes           String?
+  document        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tax_declarations")
+}
+
+model TaxPayment {
+  id          String     @id @default(uuid())
+  taxProfileId String
+  taxProfile  TaxProfile @relation(fields: [taxProfileId], references: [id], onDelete: Cascade)
+
+  amount      Float
+  date        DateTime
+  period      String
+  paymentMethod String?
+  reference   String?
+  receiptDoc  String?
+  notes       String?
+
+  createdAt   DateTime   @default(now())
+
+  @@map("tax_payments")
+}
+
+model WithholdingRecord {
+  id          String     @id @default(uuid())
+  taxProfileId String
+  taxProfile  TaxProfile @relation(fields: [taxProfileId], references: [id], onDelete: Cascade)
+
+  payerId             String
+  payerName           String
+  grossAmount         Float
+  withheldAmount      Float
+  netAmount           Float
+  date                DateTime
+  period              String
+  certificateDoc      String?
+  transactionId       String?
+  notes               String?
+  treatmentVerified   Boolean @default(false)
+  treatmentNotes      String?
+
+  createdAt   DateTime   @default(now())
+
+  @@map("withholding_records")
+}
+
+// ─── CNSS ──────────────────────────────────────────────────────────────────────
+
+model CNSSProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  cnssNumber        String?
+  affiliationDate   DateTime?
+  category          String?
+  contributionBracket String?
+  paymentFrequency  String  @default("quarterly")
+  monthlyContribution Float  @default(0)
+  amoOnly           Boolean @default(false)
+  hasAMO            Boolean @default(false)
+  hasPension        Boolean @default(false)
+  dependantsCount   Int     @default(0)
+  status            String  @default("not_configured")
+  notes             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contributions CNSSContribution[]
+
+  @@map("cnss_profiles")
+}
+
+model CNSSContribution {
+  id          String      @id @default(uuid())
+  cnssProfileId String
+  cnssProfile CNSSProfile @relation(fields: [cnssProfileId], references: [id], onDelete: Cascade)
+
+  period          String
+  amount          Float
+  dueDate         DateTime
+  paidAt          DateTime?
+  status          String   @default("pending") // "pending" | "paid" | "late"
+  paymentMethod   String?
+  reference       String?
+  receipt         String?
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("cnss_contributions")
+}
+
+// ─── TASKS & CALENDAR ──────────────────────────────────────────────────────────
+
+model Task {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  type        TaskType @default(OTHER)
+  priority    Priority @default(MEDIUM)
+  status      TaskStatus @default(PENDING)
+
+  dueDate     DateTime?
+  dueTime     String?
+  completedAt DateTime?
+
+  contactId       String?
+  contact         Contact?     @relation(fields: [contactId], references: [id])
+  propertyId      String?
+  property        Property?    @relation(fields: [propertyId], references: [id])
+  transactionId   String?
+  transaction     Transaction? @relation(fields: [transactionId], references: [id])
+
+  recurring       Boolean    @default(false)
+  recurringRule   String?
+
+  reminderAt      DateTime?
+  reminderSent    Boolean    @default(false)
+
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, dueDate])
+  @@map("tasks")
+}
+
+enum TaskType {
+  FOLLOW_UP
+  CLIENT_MEETING
+  PROPERTY_VISIT
+  PHOTOGRAPHY
+  NEGOTIATION
+  CONTRACT_SIGNING
+  NOTARY_APPOINTMENT
+  COMMISSION_COLLECTION
+  TAX_DECLARATION
+  CNSS_PAYMENT
+  MANDATE_RENEWAL
+  OTHER
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  OVERDUE
+}
+
+// ─── DOCUMENTS ─────────────────────────────────────────────────────────────────
+
+model Document {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  category    DocumentCategory
+  fileUrl     String
+  fileType    String
+  fileSize    Int?
+  tags        String[]
+
+  propertyId      String?
+  property        Property?    @relation(fields: [propertyId], references: [id])
+  transactionId   String?
+  transaction     Transaction? @relation(fields: [transactionId], references: [id])
+
+  expiryDate      DateTime?
+  version         Int     @default(1)
+
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, category])
+  @@map("documents")
+}
+
+enum DocumentCategory {
+  BUSINESS_REGISTRATION
+  AUTO_ENTREPRENEUR
+  TAX
+  CNSS
+  CLIENT
+  PROPERTY
+  MANDATE
+  CONTRACT
+  INVOICE
+  COMMISSION_RECEIPT
+  EXPENSE_RECEIPT
+  WITHHOLDING_CERTIFICATE
+  OTHER
+}
+
+// ─── NOTIFICATIONS ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        String
+  title       String
+  message     String
+  priority    String   @default("normal") // "low" | "normal" | "high" | "urgent"
+
+  relatedEntity     String?  // "contact" | "property" | "transaction" | "commission" | "task"
+  relatedEntityId   String?
+
+  read        Boolean  @default(false)
+  readAt      DateTime?
+  snoozedUntil DateTime?
+  actionUrl   String?
+
+  emailSent   Boolean  @default(false)
+  emailSentAt DateTime?
+  emailError  String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model EmailLog {
+  id          String   @id @default(uuid())
+  userId      String?
+
+  to          String
+  subject     String
+  template    String
+  status      String   // "sent" | "failed" | "bounced"
+  resendId    String?
+  error       String?
+  metadata    Json?
+
+  createdAt   DateTime @default(now())
+
+  @@map("email_logs")
+}
+
+// ─── AUDIT ─────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  action      String   // "create" | "update" | "delete"
+  entity      String
+  entityId    String
+  before      Json?
+  after       Json?
+  ipAddress   String?
+  userAgent   String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
+
+// ─── GEOSPATIAL & MARKET EXPLORER (PHASE 1) ───────────────────────────────────
+
+model PropertyLocation {
+  id                String    @id @default(uuid())
+  propertyId        String    @unique
+  latitude          Float
+  longitude         Float
+  locationPrecision String    @default("exact") // "exact" | "approximate" | "neighborhood"
+  addressDetails    String?
+  altitude          Float?
+  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime  @default(now())
+
+  @@map("property_locations")
+}
+
+model StrategicZone {
+  id          String         @id @default(uuid())
+  userId      String
+  name        String
+  category    ZoneCategory   @default(CUSTOM)
+  description String?
+  geometry    Json           // GeoJSON Polygon / MultiPolygon
+  area        Float          // Area in square meters (m²)
+  color       String         @default("#2563eb") // Hex code
+  isVisible   Boolean        @default(true)
+  tags        String[]
+  notes       String?
+  properties  ZoneProperty[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([userId])
+  @@map("strategic_zones")
+}
+
+enum ZoneCategory {
+  HAUT_STANDING
+  LUXURY_VILLAS
+  HIGH_RENTAL_POTENTIAL
+  AFFORDABLE_INVESTMENT
+  COMMERCIAL_OPPORTUNITIES
+  PROSPECTING_PRIORITY
+  CUSTOM
+}
+
+model ZoneProperty {
+  id         String        @id @default(uuid())
+  zoneId     String
+  propertyId String
+  zone       StrategicZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  createdAt  DateTime      @default(now())
+
+  @@unique([zoneId, propertyId])
+  @@index([zoneId])
+  @@index([propertyId])
+  @@map("zone_properties")
+}
+
+model MapWorkspaceSettings {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  lastLatitude        Float    @default(35.7741) // Tangier default
+  lastLongitude       Float    @default(-5.8130) // Tangier default
+  lastZoom            Float    @default(13.2)
+  lastBearing         Float    @default(0)
+  lastPitch           Float    @default(0)
+  mapStyle            String   @default("voyager")
+  lastSelectedLayers  String[] @default(["properties", "zones", "labels"])
+  updatedAt           DateTime @updatedAt
+  createdAt           DateTime @default(now())
+
+  @@map("map_workspace_settings")
+}
+
