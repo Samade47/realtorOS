@@ -16,11 +16,28 @@ import {
   createCirclePolygon,
   createRectanglePolygon,
   calculateGeometryArea,
+  calculatePerimeterMeters,
   formatArea,
+  formatDistance,
 } from "@/lib/map/market-explorer-store";
 import { formatMAD } from "@/lib/utils";
-import { AlertTriangle, RefreshCw, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  RefreshCw,
+  Loader2,
+  Building2,
+  Home,
+  Store,
+  Trees,
+  Briefcase,
+  MapPin,
+  Check,
+  Bed,
+  Bath,
+  Maximize2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 // Utility to check WebGL availability
 function isWebGLSupported(): boolean {
@@ -61,9 +78,12 @@ interface MapCanvasProps {
     buildings3d: boolean;
   };
   flyToTarget?: FlyToTarget | null;
+  highlightSurroundingCircle?: { center: [number, number]; radiusMeters: number } | null;
+  editingZoneGeometry?: GeoJSON.Polygon | null;
   onSelectProperty: (property: MapProperty) => void;
   onSelectZone: (zone: StrategicZone) => void;
   onFinishDrawZone: (geometry: GeoJSON.Polygon, areaM2: number) => void;
+  onUpdateEditingZoneGeometry?: (geometry: GeoJSON.Polygon) => void;
   onMapClickAddProperty: (coordinates: [number, number]) => void;
   onUpdatePropertyCoordinates?: (propertyId: string, coordinates: [number, number]) => void;
   onCursorMove?: (coordinates: [number, number] | null) => void;
@@ -80,9 +100,12 @@ export function MapCanvas({
   is3dMode,
   layerSettings,
   flyToTarget,
+  highlightSurroundingCircle,
+  editingZoneGeometry,
   onSelectProperty,
   onSelectZone,
   onFinishDrawZone,
+  onUpdateEditingZoneGeometry,
   onMapClickAddProperty,
   onUpdatePropertyCoordinates,
   onCursorMove,
@@ -91,12 +114,14 @@ export function MapCanvas({
   const mapContainerRef = React.useRef<HTMLDivElement>(null);
   const mapInstanceRef = React.useRef<maplibregl.Map | null>(null);
   const markersRef = React.useRef<maplibregl.Marker[]>([]);
+  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   // State for rendering lifecycle & diagnostics
   const [webGLSupported, setWebGLSupported] = React.useState<boolean>(true);
   const [mapError, setMapError] = React.useState<string | null>(null);
   const [isMapLoading, setIsMapLoading] = React.useState<boolean>(true);
   const [reloadKey, setReloadKey] = React.useState<number>(0);
+  const [currentZoom, setCurrentZoom] = React.useState<number>(12.8);
 
   // Drawing in progress state
   const [drawingPoints, setDrawingPoints] = React.useState<[number, number][]>([]);
@@ -104,7 +129,7 @@ export function MapCanvas({
   const [currentMousePos, setCurrentMousePos] = React.useState<[number, number] | null>(null);
   const [measureResult, setMeasureResult] = React.useState<MeasureResult | null>(null);
 
-  // Hovered tooltip state
+  // Hovered tooltip state (with 150ms debounce)
   const [hoveredProperty, setHoveredProperty] = React.useState<{
     property: MapProperty;
     x: number;
@@ -168,6 +193,26 @@ export function MapCanvas({
           },
         });
       }
+
+      // Zone Labels
+      if (!map.getLayer("strategic-zones-labels")) {
+        map.addLayer({
+          id: "strategic-zones-labels",
+          type: "symbol",
+          source: "strategic-zones-source",
+          layout: {
+            "text-field": ["get", "name"],
+            "text-size": 11,
+            "text-anchor": "center",
+            "text-font": ["Noto Sans Bold", "Open Sans Bold"],
+          },
+          paint: {
+            "text-color": "#ffffff",
+            "text-halo-color": "#000000",
+            "text-halo-width": 1.5,
+          },
+        });
+      }
     },
     [drawingMode, zones, onSelectZone]
   );
@@ -193,7 +238,7 @@ export function MapCanvas({
         source: "drawing-source",
         paint: {
           "fill-color": "#2563eb",
-          "fill-opacity": 0.18,
+          "fill-opacity": 0.22,
         },
       });
     }
@@ -205,7 +250,7 @@ export function MapCanvas({
         source: "drawing-source",
         paint: {
           "line-color": "#2563eb",
-          "line-width": 2,
+          "line-width": 2.5,
           "line-dasharray": [2, 2],
         },
       });
@@ -218,10 +263,42 @@ export function MapCanvas({
         source: "drawing-source",
         filter: ["==", "$type", "Point"],
         paint: {
-          "circle-radius": 5,
+          "circle-radius": 6,
           "circle-color": "#ffffff",
           "circle-stroke-color": "#2563eb",
-          "circle-stroke-width": 2,
+          "circle-stroke-width": 2.5,
+        },
+      });
+    }
+
+    // Surrounding Buffer Source & Layer (500m radius highlight)
+    if (!map.getSource("surrounding-radius-source")) {
+      map.addSource("surrounding-radius-source", {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: [],
+        },
+      });
+
+      map.addLayer({
+        id: "surrounding-radius-fill",
+        type: "fill",
+        source: "surrounding-radius-source",
+        paint: {
+          "fill-color": "#3b82f6",
+          "fill-opacity": 0.15,
+        },
+      });
+
+      map.addLayer({
+        id: "surrounding-radius-line",
+        type: "line",
+        source: "surrounding-radius-source",
+        paint: {
+          "line-color": "#2563eb",
+          "line-width": 2,
+          "line-dasharray": [3, 2],
         },
       });
     }
@@ -256,6 +333,30 @@ export function MapCanvas({
     [zones, selectedZone, layerSettings.zones]
   );
 
+  // Sync Surrounding 500m Radius Buffer
+  React.useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const source = map.getSource("surrounding-radius-source") as maplibregl.GeoJSONSource | undefined;
+    if (!source) return;
+
+    if (highlightSurroundingCircle) {
+      const circlePoly = createCirclePolygon(
+        highlightSurroundingCircle.center,
+        highlightSurroundingCircle.radiusMeters
+      );
+      source.setData({
+        type: "FeatureCollection",
+        features: [{ type: "Feature", properties: {}, geometry: circlePoly }],
+      });
+    } else {
+      source.setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+  }, [highlightSurroundingCircle]);
+
   // Toggle 3D buildings if layer exists in current style
   const update3DBuildings = React.useCallback((map: maplibregl.Map, enabled: boolean) => {
     if (!map || !map.isStyleLoaded()) return;
@@ -288,7 +389,7 @@ export function MapCanvas({
     setMapError(null);
 
     try {
-      // 2. Explicitly configure worker URL to prevent 404
+      // 2. Explicitly configure worker URL
       const workerUrl =
         typeof window !== "undefined"
           ? `${window.location.origin}/maplibre-gl-worker.mjs`
@@ -318,6 +419,11 @@ export function MapCanvas({
         if (e?.error?.message && e.error.message.includes("WebGL")) {
           setMapError("Erreur d'initialisation du contexte graphique WebGL.");
         }
+      });
+
+      // Zoom listener for smart clustering
+      map.on("zoom", () => {
+        setCurrentZoom(map.getZoom());
       });
 
       // Map loaded successfully
@@ -435,7 +541,7 @@ export function MapCanvas({
     }
   }, [flyToTarget]);
 
-  // DOM Markers for Properties
+  // DOM Markers & Clustering for Properties
   React.useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -446,15 +552,85 @@ export function MapCanvas({
 
     if (!layerSettings.properties) return;
 
-    properties.forEach((prop) => {
-      if (prop.latitude === undefined || prop.longitude === undefined) return;
+    const geocodedProperties = properties.filter(
+      (p) => p.latitude !== undefined && p.longitude !== undefined
+    );
 
+    // Smart Clustering: when zoom < 13.5, group close properties
+    const shouldCluster = currentZoom < 13.5;
+
+    if (shouldCluster) {
+      // Group properties by spatial proximity
+      const clusters: { center: [number, number]; props: MapProperty[]; bounds: [number, number, number, number] }[] = [];
+      const thresholdKm = currentZoom < 12 ? 1.5 : 0.8;
+
+      geocodedProperties.forEach((prop) => {
+        const pt = turf.point([prop.longitude!, prop.latitude!]);
+        let placed = false;
+
+        for (const cl of clusters) {
+          const clPt = turf.point(cl.center);
+          const d = turf.distance(pt, clPt, { units: "kilometers" });
+          if (d < thresholdKm) {
+            cl.props.push(prop);
+            // Recompute center
+            const avgLng = cl.props.reduce((acc, p) => acc + p.longitude!, 0) / cl.props.length;
+            const avgLat = cl.props.reduce((acc, p) => acc + p.latitude!, 0) / cl.props.length;
+            cl.center = [avgLng, avgLat];
+            placed = true;
+            break;
+          }
+        }
+
+        if (!placed) {
+          clusters.push({
+            center: [prop.longitude!, prop.latitude!],
+            props: [prop],
+            bounds: [prop.longitude!, prop.latitude!, prop.longitude!, prop.latitude!],
+          });
+        }
+      });
+
+      clusters.forEach((cl) => {
+        if (cl.props.length > 1) {
+          // Render Cluster Bubble
+          const el = document.createElement("div");
+          el.className =
+            "realtor-map-cluster cursor-pointer transform transition-transform hover:scale-110 active:scale-95 z-20";
+          el.innerHTML = `
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-600 text-white font-extrabold text-xs shadow-lg border-2 border-white ring-2 ring-blue-500/40">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>${cl.props.length} biens</span>
+            </div>
+          `;
+
+          el.addEventListener("click", () => {
+            const bbox = turf.bbox(
+              turf.featureCollection(cl.props.map((p) => turf.point([p.longitude!, p.latitude!])))
+            ) as [number, number, number, number];
+            map.fitBounds(bbox, { padding: 80, maxZoom: 16, duration: 900 });
+          });
+
+          const marker = new maplibregl.Marker({ element: el }).setLngLat(cl.center).addTo(map);
+          markersRef.current.push(marker);
+        } else {
+          // Render Single Property
+          renderSinglePropertyMarker(map, cl.props[0]);
+        }
+      });
+    } else {
+      // High zoom: render all individual rich property markers
+      geocodedProperties.forEach((prop) => {
+        renderSinglePropertyMarker(map, prop);
+      });
+    }
+
+    function renderSinglePropertyMarker(mapInstance: maplibregl.Map, prop: MapProperty) {
       const isSelected = selectedProperty?.id === prop.id;
 
-      // Custom marker DOM container
       const el = document.createElement("div");
-      el.className = `realtor-map-marker transition-transform duration-200 cursor-pointer ${
-        isSelected ? "z-30 scale-110" : "z-10 hover:scale-105"
+      el.className = `realtor-map-marker transition-all duration-200 cursor-pointer ${
+        isSelected ? "z-40 scale-115 ring-4 ring-blue-500/50 rounded-full" : "z-10 hover:scale-105"
       }`;
 
       // Abbreviate price
@@ -468,18 +644,29 @@ export function MapCanvas({
       // Color tag per property type & status
       const isRental = prop.transactionType.includes("RENTAL");
       const statusBorder =
-        prop.status === "ACTIVE"
+        prop.status === "ACTIVE" || prop.status === "NEW"
           ? "border-emerald-500 text-emerald-950 dark:text-emerald-100"
           : prop.status === "UNDER_NEGOTIATION"
           ? "border-amber-500 text-amber-950 dark:text-amber-100"
+          : prop.status === "RESERVED"
+          ? "border-blue-500 text-blue-950 dark:text-blue-100"
           : "border-slate-400 text-slate-800 dark:text-slate-200";
 
+      // Icon symbol based on category
+      const typeGlyph =
+        prop.propertyType === "VILLA"
+          ? "🏰"
+          : prop.propertyType === "COMMERCIAL" || prop.propertyType === "OFFICE"
+          ? "🏢"
+          : prop.propertyType === "LAND"
+          ? "🌲"
+          : "🏠";
+
       el.innerHTML = `
-        <div class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-white dark:bg-zinc-900 shadow-md border-2 ${statusBorder} font-bold text-[11px] leading-none whitespace-nowrap">
-          <span class="inline-block w-2 h-2 rounded-full ${
-            isRental ? "bg-purple-600" : "bg-blue-600"
-          }"></span>
-          ${layerSettings.priceBadges ? `<span>${priceLabel}</span>` : ""}
+        <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-white dark:bg-zinc-900 shadow-xl border-2 ${statusBorder} font-bold text-[11px] leading-none whitespace-nowrap">
+          <span class="text-xs leading-none">${typeGlyph}</span>
+          <span class="inline-block w-2 h-2 rounded-full ${isRental ? "bg-purple-600" : "bg-blue-600"}"></span>
+          ${layerSettings.priceBadges ? `<span class="tracking-tight">${priceLabel}</span>` : ""}
         </div>
       `;
 
@@ -489,27 +676,40 @@ export function MapCanvas({
         onSelectProperty(prop);
       });
 
-      // Hover tooltip handlers
+      // Hover tooltip handlers with 150ms debounce
       el.addEventListener("mouseenter", () => {
-        const rect = el.getBoundingClientRect();
-        setHoveredProperty({
-          property: prop,
-          x: rect.left + rect.width / 2,
-          y: rect.top,
-        });
+        if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = setTimeout(() => {
+          const rect = el.getBoundingClientRect();
+          setHoveredProperty({
+            property: prop,
+            x: rect.left + rect.width / 2,
+            y: rect.top,
+          });
+        }, 150);
       });
 
       el.addEventListener("mouseleave", () => {
-        setHoveredProperty(null);
+        if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = setTimeout(() => {
+          setHoveredProperty(null);
+        }, 80);
       });
 
       const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([prop.longitude, prop.latitude])
-        .addTo(map);
+        .setLngLat([prop.longitude!, prop.latitude!])
+        .addTo(mapInstance);
 
       markersRef.current.push(marker);
-    });
-  }, [properties, selectedProperty, layerSettings.properties, layerSettings.priceBadges, onSelectProperty]);
+    }
+  }, [
+    properties,
+    selectedProperty,
+    currentZoom,
+    layerSettings.properties,
+    layerSettings.priceBadges,
+    onSelectProperty,
+  ]);
 
   // Update Cursor when drawingMode changes
   React.useEffect(() => {
@@ -631,7 +831,14 @@ export function MapCanvas({
       map.off("click", handleMapClick);
       map.off("dblclick", handleMapDblClick);
     };
-  }, [drawingMode, drawingPoints, dragStartPoint, onMapClickAddProperty, onFinishDrawZone, onUpdateDrawingVerticesCount]);
+  }, [
+    drawingMode,
+    drawingPoints,
+    dragStartPoint,
+    onMapClickAddProperty,
+    onFinishDrawZone,
+    onUpdateDrawingVerticesCount,
+  ]);
 
   // Live mouse-move feedback for active rectangle or circle
   React.useEffect(() => {
@@ -773,46 +980,71 @@ export function MapCanvas({
         </div>
       )}
 
-      {/* Floating Hover Tooltip */}
+      {/* Premium Floating Hover Card (150ms Debounced) */}
       {hoveredProperty && (
         <div
-          className="fixed z-40 pointer-events-none transform -translate-x-1/2 -translate-y-full mb-2 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] p-2.5 shadow-2xl text-xs w-52 flex flex-col gap-1.5"
+          className="fixed z-50 pointer-events-none transform -translate-x-1/2 -translate-y-full mb-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-3 shadow-2xl text-xs w-64 flex flex-col gap-2 animate-in fade-in zoom-in-95"
           style={{ left: `${hoveredProperty.x}px`, top: `${hoveredProperty.y}px` }}
         >
           {hoveredProperty.property.photos && hoveredProperty.property.photos[0] && (
-            <img
-              src={hoveredProperty.property.photos[0]}
-              alt={hoveredProperty.property.title}
-              className="w-full h-20 object-cover rounded-[var(--radius-xs)]"
-            />
+            <div className="relative w-full h-28 rounded-[var(--radius-md)] overflow-hidden shadow-xs bg-slate-100 dark:bg-slate-800">
+              <img
+                src={hoveredProperty.property.photos[0]}
+                alt={hoveredProperty.property.title}
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute top-2 left-2 flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded-full bg-black/75 text-white font-mono text-[9px] font-bold">
+                  {hoveredProperty.property.reference}
+                </span>
+              </div>
+              <div className="absolute top-2 right-2">
+                <Badge
+                  variant={hoveredProperty.property.status === "ACTIVE" ? "success" : "muted"}
+                  className="text-[9px] shadow-sm"
+                >
+                  {hoveredProperty.property.status === "ACTIVE" ? "Disponible" : hoveredProperty.property.status}
+                </Badge>
+              </div>
+            </div>
           )}
+
           <div>
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-[9px] text-[var(--muted)] font-bold">
-                {hoveredProperty.property.reference}
-              </span>
-              <span className="font-bold text-[var(--accent)]">
+            <div className="flex items-baseline justify-between">
+              <span className="font-extrabold text-sm text-[var(--foreground)]">
                 {formatMAD(hoveredProperty.property.price)}
               </span>
+              <span className="text-[10px] text-[var(--accent)] font-bold uppercase tracking-wider">
+                {hoveredProperty.property.transactionType.includes("RENTAL") ? "Location" : "Vente"}
+              </span>
             </div>
-            <h5 className="font-bold text-[11px] text-[var(--foreground)] truncate mt-0.5">
+            <h5 className="font-bold text-xs text-[var(--foreground)] truncate mt-1">
               {hoveredProperty.property.title}
             </h5>
-            <p className="text-[10px] text-[var(--muted)] truncate">
-              {hoveredProperty.property.neighborhood} • {hoveredProperty.property.surface} m²
+            <p className="text-[11px] text-[var(--muted)] truncate mt-0.5 flex items-center gap-1">
+              <MapPin size={11} className="text-emerald-500 shrink-0" />
+              <span>{hoveredProperty.property.neighborhood}</span>
             </p>
+          </div>
+
+          <div className="flex items-center justify-between pt-1.5 border-t border-[var(--border)]/70 text-[10px] text-[var(--muted)]">
+            <span>{hoveredProperty.property.surface} m²</span>
+            <span>•</span>
+            <span>{hoveredProperty.property.bedrooms || 0} chambres</span>
+            <span>•</span>
+            <span>{hoveredProperty.property.bathrooms || 0} sdb</span>
           </div>
         </div>
       )}
 
       {/* Live Measurement Floating Pill */}
       {measureResult && (
-        <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-30 bg-black/85 text-white px-3 py-1.5 rounded-full text-xs font-semibold shadow-xl border border-white/20 backdrop-blur-md flex items-center gap-2">
+        <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-30 bg-black/85 text-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-2xl border border-white/20 backdrop-blur-md flex items-center gap-2.5">
           <span>Distance mesurée : {measureResult.distanceMeters.toLocaleString("fr-MA")} mètres</span>
           <button
             type="button"
             onClick={() => setMeasureResult(null)}
-            className="text-slate-400 hover:text-white"
+            className="text-slate-400 hover:text-white font-bold ml-1"
           >
             ×
           </button>

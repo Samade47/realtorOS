@@ -17,12 +17,28 @@ import {
   Search,
   ExternalLink,
   MapPinOff,
+  SlidersHorizontal,
+  Home,
+  Store,
+  Trees,
+  Briefcase,
+  ArrowUpDown,
+  Compass,
 } from "lucide-react";
-import { MapProperty, StrategicZone, ZoneCategory, ZONE_CATEGORIES, ZoneCategoryMeta } from "@/lib/map/map-types";
-import { formatArea } from "@/lib/map/market-explorer-store";
+import {
+  MapProperty,
+  StrategicZone,
+  ZoneCategory,
+  ZONE_CATEGORIES,
+  ZoneCategoryMeta,
+  ZonePriority,
+  MapStyleId,
+} from "@/lib/map/map-types";
+import { formatArea, MAP_STYLES } from "@/lib/map/market-explorer-store";
 import { formatMAD } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface LeftPanelProps {
   isOpen: boolean;
@@ -38,6 +54,8 @@ interface LeftPanelProps {
   onZoomToZone: (zone: StrategicZone) => void;
   onStartDrawZone: () => void;
   onPlacePropertyOnMap: (property: MapProperty) => void;
+  activeMapStyle: MapStyleId;
+  onChangeMapStyle: (styleId: MapStyleId) => void;
   layerSettings: {
     properties: boolean;
     zones: boolean;
@@ -46,6 +64,8 @@ interface LeftPanelProps {
     buildings3d: boolean;
   };
   onToggleLayer: (layerName: "properties" | "zones" | "priceBadges" | "labels" | "buildings3d") => void;
+  onOpenAdvancedFilters?: () => void;
+  activeFilterCount?: number;
 }
 
 export function LeftPanel({
@@ -62,14 +82,26 @@ export function LeftPanel({
   onZoomToZone,
   onStartDrawZone,
   onPlacePropertyOnMap,
+  activeMapStyle,
+  onChangeMapStyle,
   layerSettings,
   onToggleLayer,
+  onOpenAdvancedFilters,
+  activeFilterCount = 0,
 }: LeftPanelProps) {
   const [activeTab, setActiveTab] = React.useState<"properties" | "zones" | "layers">("properties");
-  const [propertySearch, setPropertySearch] = React.useState("");
-  const [typeFilter, setTypeFilter] = React.useState<string>("ALL");
-  const [statusFilter, setStatusFilter] = React.useState<string>("ALL");
 
+  // Property list filters
+  const [propertySearch, setPropertySearch] = React.useState("");
+  const [propertyTypeFilter, setPropertyTypeFilter] = React.useState<string>("ALL");
+  const [locationStatusFilter, setLocationStatusFilter] = React.useState<"ALL" | "LOCATED" | "UNLOCATED">("ALL");
+
+  // Zone list filters & sorting
+  const [zoneSearch, setZoneSearch] = React.useState("");
+  const [zoneCategoryFilter, setZoneCategoryFilter] = React.useState<string>("ALL");
+  const [zoneSortBy, setZoneSortBy] = React.useState<"name" | "area" | "properties" | "priority">("area");
+
+  // Filtered Properties
   const filteredProperties = React.useMemo(() => {
     return properties.filter((prop) => {
       const q = propertySearch.toLowerCase();
@@ -79,15 +111,43 @@ export function LeftPanel({
         prop.reference.toLowerCase().includes(q) ||
         prop.neighborhood.toLowerCase().includes(q);
 
-      const matchesType = typeFilter === "ALL" || prop.propertyType === typeFilter;
-      const matchesStatus =
-        statusFilter === "ALL" ||
-        (statusFilter === "LOCATED" && prop.latitude !== undefined) ||
-        (statusFilter === "UNLOCATED" && prop.latitude === undefined);
+      const matchesType = propertyTypeFilter === "ALL" || prop.propertyType === propertyTypeFilter;
+      const matchesLocation =
+        locationStatusFilter === "ALL" ||
+        (locationStatusFilter === "LOCATED" && prop.latitude !== undefined) ||
+        (locationStatusFilter === "UNLOCATED" && prop.latitude === undefined);
 
-      return matchesSearch && matchesType && matchesStatus;
+      return matchesSearch && matchesType && matchesLocation;
     });
-  }, [properties, propertySearch, typeFilter, statusFilter]);
+  }, [properties, propertySearch, propertyTypeFilter, locationStatusFilter]);
+
+  // Filtered & Sorted Strategic Zones
+  const filteredZones = React.useMemo(() => {
+    let result = zones.filter((z) => {
+      const q = zoneSearch.toLowerCase();
+      const matchesSearch =
+        !q ||
+        z.name.toLowerCase().includes(q) ||
+        (z.notes && z.notes.toLowerCase().includes(q)) ||
+        z.tags?.some((t) => t.toLowerCase().includes(q));
+
+      const matchesCategory = zoneCategoryFilter === "ALL" || z.category === zoneCategoryFilter;
+      return matchesSearch && matchesCategory;
+    });
+
+    result.sort((a, b) => {
+      if (zoneSortBy === "name") return a.name.localeCompare(b.name);
+      if (zoneSortBy === "area") return (b.areaM2 || 0) - (a.areaM2 || 0);
+      if (zoneSortBy === "properties") return (b.propertyIds?.length || 0) - (a.propertyIds?.length || 0);
+      if (zoneSortBy === "priority") {
+        const pOrder: Record<ZonePriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+        return (pOrder[b.priority || "medium"] || 2) - (pOrder[a.priority || "medium"] || 2);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [zones, zoneSearch, zoneCategoryFilter, zoneSortBy]);
 
   const locatedCount = properties.filter((p) => p.latitude !== undefined).length;
 
@@ -98,17 +158,19 @@ export function LeftPanel({
       }`}
     >
       {/* Container Card */}
-      <div className="w-full h-full bg-[var(--surface)]/95 backdrop-blur-md rounded-[var(--radius-lg)] border border-[var(--border)] shadow-xl flex flex-col overflow-hidden">
+      <div className="w-full h-full bg-[var(--surface)]/95 backdrop-blur-md rounded-[var(--radius-lg)] border border-[var(--border)] shadow-xl flex flex-col overflow-hidden text-xs text-[var(--foreground)]">
         {/* Panel Header */}
         <div className="p-3 border-b border-[var(--border)] flex items-center justify-between bg-[var(--background)]/60">
           {isOpen ? (
             <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--accent)] text-white">
+              <div className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--accent)] text-white shadow-xs">
                 <MapPin size={15} />
               </div>
               <div>
-                <h3 className="text-xs font-bold text-[var(--foreground)]">Explorateur Immobilier</h3>
-                <p className="text-[10px] text-[var(--muted)]">Tanger • {locatedCount} biens cartographiés</p>
+                <h3 className="text-xs font-bold text-[var(--foreground)]">Market Explorer Tanger</h3>
+                <p className="text-[10px] text-[var(--muted)]">
+                  {locatedCount} / {properties.length} biens sur la carte
+                </p>
               </div>
             </div>
           ) : (
@@ -167,125 +229,122 @@ export function LeftPanel({
                 }`}
               >
                 <Layers size={13} />
-                <span>Calques</span>
+                <span>Couches</span>
               </button>
             </div>
 
             {/* TAB 1: PROPERTIES LIST */}
             {activeTab === "properties" && (
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Search & Filters */}
-                <div className="p-2.5 border-b border-[var(--border)] space-y-2 bg-[var(--background)]/40">
-                  <div className="flex items-center gap-2 px-2 py-1 bg-[var(--surface)] rounded-[var(--radius-md)] border border-[var(--border)]">
-                    <Search size={13} className="text-[var(--muted)]" />
-                    <input
-                      type="text"
+              <div className="flex-1 flex flex-col overflow-hidden p-3 gap-2.5">
+                {/* Search & Advanced Filter Button */}
+                <div className="flex items-center gap-1.5">
+                  <div className="relative flex-1">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                    <Input
                       value={propertySearch}
                       onChange={(e) => setPropertySearch(e.target.value)}
-                      placeholder="Filtrer réf, titre ou quartier..."
-                      className="w-full bg-transparent text-xs text-[var(--foreground)] placeholder:text-[var(--muted)] outline-none"
+                      placeholder="Chercher référence, titre..."
+                      className="h-8 pl-8 text-xs"
                     />
                   </div>
 
-                  <div className="flex items-center gap-1.5 overflow-x-auto text-[11px]">
-                    <select
-                      value={typeFilter}
-                      onChange={(e) => setTypeFilter(e.target.value)}
-                      className="bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] rounded px-1.5 py-0.5 outline-none"
+                  {onOpenAdvancedFilters && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={onOpenAdvancedFilters}
+                      className="h-8 px-2 gap-1 relative border-[var(--border)] shrink-0"
+                      title="Filtres avancés"
                     >
-                      <option value="ALL">Tous types</option>
-                      <option value="APARTMENT">Appartements</option>
-                      <option value="VILLA">Villas</option>
-                      <option value="COMMERCIAL">Bureaux / Commerces</option>
-                      <option value="LAND">Terrains</option>
-                      <option value="STUDIO">Studios</option>
-                      <option value="DUPLEX">Duplex</option>
-                    </select>
-
-                    <select
-                      value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value)}
-                      className="bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] rounded px-1.5 py-0.5 outline-none"
-                    >
-                      <option value="ALL">Tous statuts</option>
-                      <option value="LOCATED">Sur la carte ({locatedCount})</option>
-                      <option value="UNLOCATED">Sans coordonnées</option>
-                    </select>
-                  </div>
+                      <SlidersHorizontal size={13} />
+                      {activeFilterCount > 0 && (
+                        <span className="w-2 h-2 rounded-full bg-[var(--accent)] absolute -top-1 -right-1"></span>
+                      )}
+                    </Button>
+                  )}
                 </div>
 
-                {/* Property Cards List */}
-                <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)] p-1">
+                {/* Quick Status Pill Filters */}
+                <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[10px]">
+                  {[
+                    { id: "ALL", label: "Tous" },
+                    { id: "LOCATED", label: `Sur la carte (${locatedCount})` },
+                    { id: "UNLOCATED", label: `À placer (${properties.length - locatedCount})` },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setLocationStatusFilter(f.id as any)}
+                      className={`px-2 py-1 rounded-full whitespace-nowrap transition-colors ${
+                        locationStatusFilter === f.id
+                          ? "bg-[var(--accent)] text-white font-bold"
+                          : "bg-[var(--background)] text-[var(--muted)] hover:text-[var(--foreground)] border border-[var(--border)]"
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Scrollable Property Items */}
+                <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
                   {filteredProperties.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-[var(--muted)]">
-                      Aucun bien ne correspond aux filtres.
+                    <div className="p-6 text-center text-[var(--muted)] border border-dashed border-[var(--border)] rounded-[var(--radius-md)]">
+                      <p>Aucun bien ne correspond aux filtres.</p>
                     </div>
                   ) : (
                     filteredProperties.map((prop) => {
                       const isSelected = selectedPropertyId === prop.id;
-                      const hasCoords = prop.latitude !== undefined && prop.longitude !== undefined;
+                      const isLocated = prop.latitude !== undefined && prop.longitude !== undefined;
+
                       return (
                         <div
                           key={prop.id}
                           onClick={() => {
-                            if (hasCoords) onSelectProperty(prop);
+                            if (isLocated) {
+                              onSelectProperty(prop);
+                            }
                           }}
-                          className={`p-2.5 rounded-[var(--radius-md)] transition-all cursor-pointer flex gap-2.5 ${
+                          className={`flex items-start gap-2.5 p-2 rounded-[var(--radius-md)] border transition-all cursor-pointer ${
                             isSelected
-                              ? "bg-[var(--accent-subtle)] border border-[var(--accent)]"
-                              : "hover:bg-[var(--border-subtle)]"
+                              ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]"
+                              : "border-[var(--border)] hover:bg-[var(--border-subtle)] bg-[var(--background)]/40"
                           }`}
                         >
-                          {/* Thumbnail */}
-                          <div className="relative w-16 h-16 rounded-[var(--radius-sm)] overflow-hidden shrink-0 bg-slate-200 dark:bg-slate-800">
-                            {prop.photos && prop.photos[0] ? (
-                              <img
-                                src={prop.photos[0]}
-                                alt={prop.title}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-[var(--muted)]">
-                                <Building2 size={20} />
-                              </div>
-                            )}
-                            <span className="absolute bottom-0 inset-x-0 bg-black/60 text-[9px] text-white text-center py-0.5 font-medium truncate">
-                              {prop.neighborhood}
-                            </span>
-                          </div>
+                          {prop.photos && prop.photos[0] ? (
+                            <img
+                              src={prop.photos[0]}
+                              alt={prop.title}
+                              className="w-14 h-14 object-cover rounded shrink-0 shadow-2xs"
+                            />
+                          ) : (
+                            <div className="w-14 h-14 bg-slate-200 dark:bg-slate-800 rounded flex items-center justify-center shrink-0">
+                              <Building2 size={18} className="text-slate-400" />
+                            </div>
+                          )}
 
-                          {/* Info */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-1">
-                              <span className="text-[10px] font-mono text-[var(--muted)] font-semibold">
+                              <span className="font-mono text-[9px] font-bold text-[var(--muted)]">
                                 {prop.reference}
                               </span>
-                              <Badge
-                                variant={prop.status === "ACTIVE" ? "success" : "muted"}
-                                className="text-[9px] py-0 px-1"
-                              >
-                                {prop.status === "ACTIVE" ? "Disponible" : prop.status}
-                              </Badge>
-                            </div>
-
-                            <h4 className="text-xs font-bold text-[var(--foreground)] truncate mt-0.5">
-                              {prop.title}
-                            </h4>
-
-                            <div className="flex items-center justify-between mt-1 text-xs">
-                              <span className="font-bold text-[var(--accent)]">
+                              <span className="font-extrabold text-xs text-[var(--foreground)]">
                                 {formatMAD(prop.price)}
                               </span>
-                              <span className="text-[10px] text-[var(--muted)]">
-                                {prop.surface} m² • {prop.propertyType}
-                              </span>
                             </div>
 
-                            {/* Location Status Indicator */}
-                            <div className="mt-1.5 flex items-center justify-between">
-                              {hasCoords ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
-                                  <MapPin size={10} /> Localisé à Tanger
+                            <h5 className="font-bold text-[11px] truncate text-[var(--foreground)] mt-0.5">
+                              {prop.title}
+                            </h5>
+
+                            <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mt-1">
+                              <span className="truncate">
+                                {prop.neighborhood} • {prop.surface} m²
+                              </span>
+                              {isLocated ? (
+                                <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold shrink-0">
+                                  <MapPin size={10} /> Carte
                                 </span>
                               ) : (
                                 <button
@@ -294,9 +353,9 @@ export function LeftPanel({
                                     e.stopPropagation();
                                     onPlacePropertyOnMap(prop);
                                   }}
-                                  className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 hover:text-amber-700 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800"
+                                  className="inline-flex items-center gap-1 text-amber-600 font-bold hover:underline shrink-0"
                                 >
-                                  <MapPinOff size={10} /> Placer sur la carte
+                                  <MapPinOff size={10} /> + Placer
                                 </button>
                               )}
                             </div>
@@ -309,110 +368,114 @@ export function LeftPanel({
               </div>
             )}
 
-            {/* TAB 2: STRATEGIC ZONES */}
+            {/* TAB 2: STRATEGIC ZONES LIST */}
             {activeTab === "zones" && (
-              <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="p-2.5 border-b border-[var(--border)] flex items-center justify-between bg-[var(--background)]/40">
-                  <span className="text-xs text-[var(--muted)] font-medium">
-                    {zones.length} zone{zones.length > 1 ? "s" : ""} stratégique{zones.length > 1 ? "s" : ""}
-                  </span>
+              <div className="flex-1 flex flex-col overflow-hidden p-3 gap-2.5">
+                {/* Search & Actions */}
+                <div className="flex items-center gap-1.5">
+                  <div className="relative flex-1">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                    <Input
+                      value={zoneSearch}
+                      onChange={(e) => setZoneSearch(e.target.value)}
+                      placeholder="Filtrer les zones..."
+                      className="h-8 pl-8 text-xs"
+                    />
+                  </div>
+
                   <Button
+                    type="button"
                     size="sm"
-                    variant="default"
                     onClick={onStartDrawZone}
-                    leftIcon={<Plus size={12} />}
-                    className="text-xs h-7 px-2"
+                    className="h-8 px-2.5 gap-1 bg-[var(--accent)] hover:bg-[var(--accent)]/90 text-white font-bold text-xs shrink-0"
                   >
-                    Tracer zone
+                    <Plus size={13} />
+                    <span>Tracer</span>
                   </Button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)] p-1">
-                  {zones.length === 0 ? (
-                    <div className="p-8 text-center text-xs text-[var(--muted)] space-y-2">
-                      <Shapes size={28} className="mx-auto text-[var(--muted)] opacity-60" />
-                      <p className="font-semibold text-[var(--foreground)]">Créez votre première zone stratégique</p>
-                      <p className="text-[11px]">
-                        Tracez un polygone sur Tanger pour délimiter vos secteurs prioritaires et analyser les biens
-                        inclus.
-                      </p>
-                      <Button size="sm" variant="outline" onClick={onStartDrawZone} className="text-xs mt-2">
-                        Commencer le tracé
+                {/* Sort Selector */}
+                <div className="flex items-center justify-between text-[11px] text-[var(--muted)] px-1">
+                  <span>Trier par :</span>
+                  <select
+                    value={zoneSortBy}
+                    onChange={(e) => setZoneSortBy(e.target.value as any)}
+                    className="bg-transparent font-semibold text-[var(--foreground)] outline-none cursor-pointer"
+                  >
+                    <option value="area">Superficie (m²)</option>
+                    <option value="properties">Nombre de biens</option>
+                    <option value="priority">Priorité stratégique</option>
+                    <option value="name">Nom alphabétique</option>
+                  </select>
+                </div>
+
+                {/* Scrollable Zones List */}
+                <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
+                  {filteredZones.length === 0 ? (
+                    <div className="p-6 text-center text-[var(--muted)] border border-dashed border-[var(--border)] rounded-[var(--radius-md)]">
+                      <p>Aucune zone stratégique enregistrée.</p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={onStartDrawZone}
+                        className="mt-2 text-xs"
+                      >
+                        Tracer votre première zone
                       </Button>
                     </div>
                   ) : (
-                    zones.map((zone) => {
+                    filteredZones.map((zone) => {
                       const isSelected = selectedZoneId === zone.id;
-                      const catMeta = ZONE_CATEGORIES.find((c: ZoneCategoryMeta) => c.id === zone.category);
+                      const priorityColor =
+                        zone.priority === "critical"
+                          ? "bg-rose-500"
+                          : zone.priority === "high"
+                          ? "bg-amber-500"
+                          : "bg-blue-500";
+
                       return (
                         <div
                           key={zone.id}
-                          onClick={() => onSelectZone(zone)}
-                          className={`p-2.5 rounded-[var(--radius-md)] transition-all cursor-pointer space-y-1.5 ${
+                          onClick={() => {
+                            onSelectZone(zone);
+                            onZoomToZone(zone);
+                          }}
+                          className={`p-2.5 rounded-[var(--radius-md)] border transition-all cursor-pointer ${
                             isSelected
-                              ? "bg-[var(--accent-subtle)] border border-[var(--accent)]"
-                              : "hover:bg-[var(--border-subtle)]"
+                              ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]"
+                              : "border-[var(--border)] hover:bg-[var(--border-subtle)] bg-[var(--background)]/40"
                           }`}
                         >
-                          <div className="flex items-center justify-between gap-1">
-                            <div className="flex items-center gap-1.5 min-w-0">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-2 min-w-0">
                               <span
-                                className="h-3 w-3 rounded-full shrink-0 border border-white/40 shadow-2xs"
+                                className="w-3 h-3 rounded-full shrink-0 shadow-2xs"
                                 style={{ backgroundColor: zone.color }}
                               />
-                              <h4 className="text-xs font-bold text-[var(--foreground)] truncate">
-                                {zone.name}
-                              </h4>
+                              <h5 className="font-bold text-xs truncate text-[var(--foreground)]">{zone.name}</h5>
                             </div>
-                            <span className="text-[10px] font-semibold text-[var(--muted)] shrink-0">
-                              {formatArea(zone.areaM2)}
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onToggleZoneVisibility(zone.id);
+                                }}
+                                className="p-1 text-[var(--muted)] hover:text-[var(--foreground)]"
+                                title={zone.isVisible ? "Masquer la zone" : "Afficher la zone"}
+                              >
+                                {zone.isVisible ? <Eye size={13} /> : <EyeOff size={13} className="text-slate-400" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px] text-[var(--muted)] mt-1.5 pt-1.5 border-t border-[var(--border)]/50">
+                            <span className="font-mono">{formatArea(zone.areaM2)}</span>
+                            <span className="font-semibold text-[var(--accent)]">
+                              {zone.propertyIds?.length || 0} biens inclus
                             </span>
-                          </div>
-
-                          <div className="flex items-center justify-between text-[11px] text-[var(--muted)]">
-                            <span className="truncate">{catMeta?.label || zone.category}</span>
-                            <Badge variant="outline" className="text-[9px] py-0">
-                              {zone.propertyIds.length} bien{zone.propertyIds.length > 1 ? "s" : ""} inclus
-                            </Badge>
-                          </div>
-
-                          {/* Quick zone actions */}
-                          <div className="pt-1 flex items-center justify-end gap-1">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onToggleZoneVisibility(zone.id);
-                              }}
-                              className="p-1 text-[var(--muted)] hover:text-[var(--foreground)] rounded"
-                              title={zone.isVisible ? "Masquer sur la carte" : "Afficher sur la carte"}
-                            >
-                              {zone.isVisible ? <Eye size={13} /> : <EyeOff size={13} className="text-rose-500" />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onZoomToZone(zone);
-                              }}
-                              className="p-1 text-[var(--muted)] hover:text-[var(--accent)] rounded"
-                              title="Centrer la vue sur cette zone"
-                            >
-                              <Focus size={13} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm(`Supprimer la zone "${zone.name}" ?`)) {
-                                  onDeleteZone(zone.id);
-                                }
-                              }}
-                              className="p-1 text-[var(--muted)] hover:text-rose-600 rounded"
-                              title="Supprimer la zone"
-                            >
-                              <Trash2 size={13} />
-                            </button>
                           </div>
                         </div>
                       );
@@ -422,51 +485,65 @@ export function LeftPanel({
               </div>
             )}
 
-            {/* TAB 3: MAP LAYERS & VISIBILITY */}
+            {/* TAB 3: LAYERS & MAP STYLES */}
             {activeTab === "layers" && (
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
-                <div>
-                  <h4 className="font-bold text-[var(--foreground)] mb-1">Affichage des Éléments</h4>
-                  <p className="text-[11px] text-[var(--muted)] mb-3">
-                    Activez ou désactivez les couches d'informations selon vos besoins d'analyse.
-                  </p>
-
-                  <div className="space-y-2.5">
+              <div className="flex-1 overflow-y-auto p-3 space-y-4">
+                {/* Layers Visibility Toggles */}
+                <div className="space-y-2">
+                  <span className="font-bold text-[11px] uppercase tracking-wider text-[var(--muted)] block">
+                    Visibilité des couches cartographiques
+                  </span>
+                  <div className="space-y-1.5">
                     {[
-                      { key: "properties", label: "Marqueurs des biens immobiliers", desc: "Affiche les épingles de vos mandats" },
-                      { key: "priceBadges", label: "Étiquettes de prix en Dirhams", desc: "Affiche le prix direct sur les marqueurs" },
-                      { key: "zones", label: "Zones géographiques stratégiques", desc: "Contours et polygones d'analyse sectorielle" },
-                      { key: "buildings3d", label: "Perspective 3D des bâtiments", desc: "Volume et hauteur du bâti urbain" },
-                      { key: "labels", label: "Toponymie & Noms de rues", desc: "Repères officiels et voirie de Tanger" },
+                      { key: "properties", label: "Biens immobiliers géolocalisés" },
+                      { key: "zones", label: "Zones stratégiques tracées" },
+                      { key: "priceBadges", label: "Badges de prix sur les marqueurs" },
+                      { key: "labels", label: "Noms des rues & repères urbains" },
+                      { key: "buildings3d", label: "Extrusion 3D des bâtiments" },
                     ].map((layer) => {
                       const isChecked = layerSettings[layer.key as keyof typeof layerSettings];
                       return (
                         <label
                           key={layer.key}
-                          className="flex items-start gap-2.5 p-2 rounded-[var(--radius-md)] border border-[var(--border)] hover:bg-[var(--border-subtle)] cursor-pointer transition-colors"
+                          className="flex items-center justify-between p-2 rounded-[var(--radius-md)] border border-[var(--border)] hover:bg-[var(--border-subtle)] cursor-pointer transition-colors"
                         >
+                          <span className="font-medium text-xs">{layer.label}</span>
                           <input
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => onToggleLayer(layer.key as any)}
-                            className="mt-0.5 rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                            className="rounded accent-[var(--accent)]"
                           />
-                          <div className="min-w-0">
-                            <span className="font-semibold text-[var(--foreground)] block">{layer.label}</span>
-                            <span className="text-[10px] text-[var(--muted)] block">{layer.desc}</span>
-                          </div>
                         </label>
                       );
                     })}
                   </div>
                 </div>
 
-                <div className="p-3 rounded-[var(--radius-md)] bg-[var(--background)] border border-[var(--border)] space-y-1">
-                  <span className="font-bold text-[11px] text-[var(--foreground)] block">Système Géodésique</span>
-                  <p className="text-[10px] text-[var(--muted)]">
-                    Coordonnées projetées WGS84 (EPSG:4326) • Calculs de surfaces géodésiques via Turf.js conformes aux
-                    normes SIG marocaines.
-                  </p>
+                {/* Map Styles Selector */}
+                <div className="space-y-2 pt-2 border-t border-[var(--border)]">
+                  <span className="font-bold text-[11px] uppercase tracking-wider text-[var(--muted)] block">
+                    Style cartographique actif
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {MAP_STYLES.map((style) => (
+                      <button
+                        key={style.id}
+                        type="button"
+                        onClick={() => onChangeMapStyle(style.id)}
+                        className={`p-2 rounded-[var(--radius-md)] border text-left transition-all ${
+                          activeMapStyle === style.id
+                            ? "border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)] font-bold text-[var(--accent)]"
+                            : "border-[var(--border)] hover:bg-[var(--border-subtle)] text-[var(--foreground)]"
+                        }`}
+                      >
+                        <div className="text-xs truncate">{style.name.split(" ")[0]}</div>
+                        <div className="text-[10px] text-[var(--muted)] font-normal truncate">
+                          {style.description.slice(0, 32)}...
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

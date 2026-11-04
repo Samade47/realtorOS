@@ -1,7 +1,7 @@
 /**
  * RealtorOS Morocco — Market Explorer Store & Spatial Engine
  * Manages geocoded properties in Tangier, strategic geographical zones,
- * spatial point-in-polygon queries, and map workspace settings.
+ * spatial point-in-polygon queries, geometry validation, analytics, and map workspace settings.
  */
 
 import * as turf from "@turf/turf";
@@ -9,9 +9,14 @@ import {
   MapProperty,
   StrategicZone,
   ZoneCategory,
+  ZonePriority,
   MapStyleOption,
   MapWorkspaceSettings,
   LocationSearchResult,
+  PropertyLocationHistory,
+  PropertyFilterState,
+  DEFAULT_PROPERTY_FILTER_STATE,
+  ZoneAnalytics,
 } from "./map-types";
 import { DEMO_PROPERTIES } from "@/lib/data/demo-data";
 
@@ -75,6 +80,9 @@ export const INITIAL_MAP_PROPERTIES: MapProperty[] = [
     latitude: 35.7765,
     longitude: -5.782,
     locationPrecision: "exact",
+    standing: "haut_standing",
+    ownerPhone: "+212 6 61 23 45 67",
+    ownerEmail: "amine.tazi@gmail.com",
     photos: [
       "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1000&q=80",
       "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1000&q=80",
@@ -85,6 +93,9 @@ export const INITIAL_MAP_PROPERTIES: MapProperty[] = [
     latitude: 35.7925,
     longitude: -5.8205,
     locationPrecision: "exact",
+    standing: "luxe",
+    ownerPhone: "+212 6 63 45 67 89",
+    ownerEmail: "fatima.alouani@yahoo.fr",
     photos: [
       "https://images.unsplash.com/photo-1613977257363-707ba9348227?auto=format&fit=crop&w=1000&q=80",
       "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1000&q=80",
@@ -95,6 +106,9 @@ export const INITIAL_MAP_PROPERTIES: MapProperty[] = [
     latitude: 35.7801,
     longitude: -5.8124,
     locationPrecision: "exact",
+    standing: "moyen_standing",
+    ownerPhone: "+212 6 65 12 34 56",
+    ownerEmail: "karim.drissi@gmail.com",
     photos: [
       "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1000&q=80",
       "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1000&q=80",
@@ -105,6 +119,9 @@ export const INITIAL_MAP_PROPERTIES: MapProperty[] = [
     latitude: 35.7712,
     longitude: -5.834,
     locationPrecision: "exact",
+    standing: "luxe",
+    ownerPhone: "+212 6 67 89 01 23",
+    ownerEmail: "nabil.chraibi@outlook.com",
     photos: [
       "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1000&q=80",
       "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1000&q=80",
@@ -115,12 +132,14 @@ export const INITIAL_MAP_PROPERTIES: MapProperty[] = [
     latitude: 35.778,
     longitude: -5.822,
     locationPrecision: "exact",
+    standing: "haut_standing",
+    ownerPhone: "+212 6 61 98 76 54",
+    ownerEmail: "laila.elamrani@gmail.com",
     photos: [
       "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1000&q=80",
       "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1000&q=80",
     ],
   },
-  // Additional rich properties across Tangier
   {
     id: "p-6",
     reference: "TNG-2026-063",
@@ -136,11 +155,14 @@ export const INITIAL_MAP_PROPERTIES: MapProperty[] = [
     bathrooms: 6,
     furnished: "unfurnished",
     condition: "new",
+    standing: "luxe",
     legalStatus: "TITLED",
     titreFoncier: "TF 302811/06",
     status: "ACTIVE",
     ownerName: "Amine Benjelloun",
     ownerId: "c-1",
+    ownerPhone: "+212 6 61 77 88 99",
+    ownerEmail: "a.benjelloun@detroit.ma",
     mandateType: "exclusive",
     mandateExpiry: "2027-06-30",
     daysOnMarket: 12,
@@ -168,11 +190,14 @@ export const INITIAL_MAP_PROPERTIES: MapProperty[] = [
     bathrooms: 0,
     furnished: "unfurnished",
     condition: "new",
+    standing: "haut_standing",
     legalStatus: "TITLED",
     titreFoncier: "TF 441092/06",
     status: "ACTIVE",
     ownerName: "Société Foncière Détroit",
     ownerId: "c-9",
+    ownerPhone: "+212 5 39 33 22 11",
+    ownerEmail: "contact@fonciere-detroit.ma",
     mandateType: "exclusive",
     mandateExpiry: "2027-04-15",
     daysOnMarket: 22,
@@ -200,11 +225,14 @@ export const INITIAL_MAP_PROPERTIES: MapProperty[] = [
     floor: 2,
     furnished: "unfurnished",
     condition: "new",
+    standing: "moyen_standing",
     legalStatus: "TITLED",
     titreFoncier: "TF 510884/06",
     status: "ACTIVE",
     ownerName: "Tanger Marina Bay SARL",
     ownerId: "c-5",
+    ownerPhone: "+212 6 62 11 44 55",
+    ownerEmail: "contact@marinabay.ma",
     mandateType: "simple",
     mandateExpiry: "2027-01-31",
     daysOnMarket: 35,
@@ -227,6 +255,7 @@ export const INITIAL_STRATEGIC_ZONES: StrategicZone[] = [
     id: "zone-marshan-prestige",
     name: "Secteur Historique & Prestige — Marshan",
     category: "luxury_villas",
+    priority: "critical",
     description: "Quartier emblématique dominant le Détroit de Gibraltar, prisé pour ses propriétés historiques et sa tranquillité.",
     color: "#9333ea", // Purple
     isVisible: true,
@@ -245,6 +274,7 @@ export const INITIAL_STRATEGIC_ZONES: StrategicZone[] = [
       ],
     },
     areaM2: 520000,
+    perimeterM: 2950,
     propertyIds: ["p-2"],
     createdAt: "2026-09-15T10:00:00Z",
     updatedAt: "2026-11-01T14:30:00Z",
@@ -253,6 +283,7 @@ export const INITIAL_STRATEGIC_ZONES: StrategicZone[] = [
     id: "zone-malabata-bay",
     name: "Front de Mer & Baie — Malabata",
     category: "haut_standing",
+    priority: "high",
     description: "Corniche maritime et résidences de standing avec vue directe sur la baie de Tanger.",
     color: "#2563eb", // Deep blue
     isVisible: true,
@@ -271,6 +302,7 @@ export const INITIAL_STRATEGIC_ZONES: StrategicZone[] = [
       ],
     },
     areaM2: 780000,
+    perimeterM: 3600,
     propertyIds: ["p-1"],
     createdAt: "2026-09-20T11:00:00Z",
     updatedAt: "2026-11-02T16:00:00Z",
@@ -279,6 +311,7 @@ export const INITIAL_STRATEGIC_ZONES: StrategicZone[] = [
     id: "zone-iberia-business",
     name: "Pôle Tertiaire & Libéral — Iberia",
     category: "commercial_opportunities",
+    priority: "medium",
     description: "Cœur économique et consulaire de Tanger, idéal pour bureaux, professions libérales et commerces de standing.",
     color: "#ea580c", // Amber / orange
     isVisible: true,
@@ -297,6 +330,7 @@ export const INITIAL_STRATEGIC_ZONES: StrategicZone[] = [
       ],
     },
     areaM2: 410000,
+    perimeterM: 2600,
     propertyIds: ["p-5"],
     createdAt: "2026-10-05T09:30:00Z",
     updatedAt: "2026-11-03T10:15:00Z",
@@ -388,11 +422,73 @@ export const TANGIER_LOCATION_INDEX: LocationSearchResult[] = [
     coordinates: [-5.839, 35.761],
     zoom: 14.2,
   },
+  {
+    id: "loc-kasbah",
+    title: "La Kasbah & Médina",
+    subtitle: "Cœur historique • Riads authentiques et terrasses panoramiques",
+    type: "neighborhood",
+    coordinates: [-5.8115, 35.789],
+    zoom: 15.5,
+  },
+  {
+    id: "loc-gzenaya",
+    title: "Gzenaya (Tanger Free Zone)",
+    subtitle: "Pôle logistique & aéroport Tanger Ibn Battouta",
+    type: "neighborhood",
+    coordinates: [-5.908, 35.715],
+    zoom: 13.8,
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SPATIAL ALGORITHMS (TURF.JS ENGINE)
+// SPATIAL ALGORITHMS & VALIDATION (TURF.JS ENGINE)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Validates a polygon geometry:
+ * - Checks coordinate count (minimum 3 distinct vertices).
+ * - Detects self-intersections using turf.kinks.
+ * - Validates coordinate bounds.
+ */
+export function validatePolygonGeometry(geometry: GeoJSON.Polygon): { valid: boolean; error?: string } {
+  try {
+    if (!geometry || !geometry.coordinates || !geometry.coordinates[0]) {
+      return { valid: false, error: "Géométrie vide ou invalide." };
+    }
+
+    const ring = geometry.coordinates[0];
+    if (ring.length < 4) {
+      return { valid: false, error: "Un polygone doit contenir au moins 3 sommets distincts." };
+    }
+
+    // Coordinate range check
+    for (const pt of ring) {
+      const [lng, lat] = pt;
+      if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+        return { valid: false, error: `Coordonnées hors limites géographiques : [${lng}, ${lat}]` };
+      }
+    }
+
+    // Self-intersection check using turf.kinks
+    const polygonFeature = turf.polygon(geometry.coordinates);
+    const kinks = turf.kinks(polygonFeature);
+    if (kinks.features.length > 0) {
+      return {
+        valid: false,
+        error: "Le polygone s'auto-intersecte (arêtes croisées). Veuillez ajuster les sommets.",
+      };
+    }
+
+    const area = turf.area(polygonFeature);
+    if (area <= 0) {
+      return { valid: false, error: "La superficie du polygone doit être supérieure à zéro." };
+    }
+
+    return { valid: true };
+  } catch (err: any) {
+    return { valid: false, error: err?.message || "Erreur de validation géométrique." };
+  }
+}
 
 /**
  * Calculates geographical area in square meters using geodesic formula.
@@ -407,6 +503,25 @@ export function calculateGeometryArea(geometry: GeoJSON.Polygon | GeoJSON.MultiP
 }
 
 /**
+ * Calculates perimeter in meters of a polygon geometry.
+ */
+export function calculatePerimeterMeters(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon): number {
+  try {
+    const line = turf.polygonToLine(geometry as any);
+    if (line.type === "FeatureCollection") {
+      let totalKm = 0;
+      line.features.forEach((f) => {
+        totalKm += turf.length(f, { units: "kilometers" });
+      });
+      return Math.round(totalKm * 1000);
+    }
+    return Math.round(turf.length(line, { units: "kilometers" }) * 1000);
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Formats area into human readable string (m² or km²).
  */
 export function formatArea(areaM2: number): string {
@@ -414,6 +529,16 @@ export function formatArea(areaM2: number): string {
     return `${(areaM2 / 1000000).toFixed(2)} km²`;
   }
   return `${Math.round(areaM2).toLocaleString("fr-MA")} m²`;
+}
+
+/**
+ * Formats distance into human readable string (m or km).
+ */
+export function formatDistance(meters: number): string {
+  if (meters >= 1000) {
+    return `${(meters / 1000).toFixed(2)} km`;
+  }
+  return `${Math.round(meters).toLocaleString("fr-MA")} m`;
 }
 
 /**
@@ -436,10 +561,90 @@ export function findPropertiesInPolygon(
 }
 
 /**
+ * Calculates comprehensive spatial analytics for a strategic zone.
+ */
+export function calculateZoneAnalytics(zone: StrategicZone, properties: MapProperty[]): ZoneAnalytics {
+  const areaM2 = zone.areaM2 || calculateGeometryArea(zone.geometry);
+  const perimeterM = zone.perimeterM || calculatePerimeterMeters(zone.geometry);
+  const includedProps = findPropertiesInPolygon(properties, zone.geometry);
+
+  const exactCount = includedProps.filter((p) => p.locationPrecision === "exact").length;
+  const approxCount = includedProps.length - exactCount;
+
+  const availableCount = includedProps.filter((p) => p.status === "ACTIVE" || p.status === "NEW").length;
+  const negotiationCount = includedProps.filter((p) => p.status === "UNDER_NEGOTIATION" || p.status === "RESERVED").length;
+  const soldOrRentedCount = includedProps.filter((p) => p.status === "SOLD" || p.status === "RENTED").length;
+
+  let totalAskingValueMAD = 0;
+  let totalSurfaceM2 = 0;
+
+  const propertiesByType: Record<string, number> = {};
+  const propertiesByTransaction: Record<string, number> = {};
+
+  includedProps.forEach((p) => {
+    totalAskingValueMAD += p.price || 0;
+    if (p.surface) totalSurfaceM2 += p.surface;
+
+    const pType = p.propertyType || "AUTRE";
+    propertiesByType[pType] = (propertiesByType[pType] || 0) + 1;
+
+    p.transactionType.forEach((t) => {
+      propertiesByTransaction[t] = (propertiesByTransaction[t] || 0) + 1;
+    });
+  });
+
+  const averagePricePerM2MAD =
+    totalSurfaceM2 > 0 ? Math.round(totalAskingValueMAD / totalSurfaceM2) : 0;
+
+  return {
+    areaM2,
+    perimeterM,
+    totalProperties: includedProps.length,
+    exactPropertiesCount: exactCount,
+    approximatePropertiesCount: approxCount,
+    availableCount,
+    negotiationCount,
+    soldOrRentedCount,
+    totalAskingValueMAD,
+    averagePricePerM2MAD,
+    propertiesByType,
+    propertiesByTransaction,
+    propertiesList: includedProps,
+  };
+}
+
+/**
+ * Reverse geocodes a [lng, lat] point in Tangier to the closest known neighborhood/sector.
+ */
+export function reverseGeocodeTangier(
+  lng: number,
+  lat: number
+): { neighborhood: string; address: string; postalCode: string } {
+  const currentPt = turf.point([lng, lat]);
+  let closestLocation = TANGIER_LOCATION_INDEX[0];
+  let minDistance = Infinity;
+
+  TANGIER_LOCATION_INDEX.forEach((loc) => {
+    const locPt = turf.point(loc.coordinates);
+    const d = turf.distance(currentPt, locPt, { units: "kilometers" });
+    if (d < minDistance) {
+      minDistance = d;
+      closestLocation = loc;
+    }
+  });
+
+  const neighborhood = closestLocation.title.split("(")[0].trim();
+  const address = `Secteur ${neighborhood}, Tanger`;
+  const postalCode = "90000";
+
+  return { neighborhood, address, postalCode };
+}
+
+/**
  * Generates an approximated circle polygon given a center and radius in meters.
  */
 export function createCirclePolygon(centerLngLat: [number, number], radiusMeters: number): GeoJSON.Polygon {
-  const radiusKm = radiusMeters / 1000;
+  const radiusKm = Math.max(radiusMeters / 1000, 0.01);
   const circleFeature = turf.circle(centerLngLat, radiusKm, { steps: 64, units: "kilometers" });
   return circleFeature.geometry as GeoJSON.Polygon;
 }
@@ -477,13 +682,96 @@ export function synchronizeZonesWithProperties(
   return zones.map((zone) => {
     const insideProps = findPropertiesInPolygon(properties, zone.geometry);
     const areaM2 = calculateGeometryArea(zone.geometry);
+    const perimeterM = calculatePerimeterMeters(zone.geometry);
     return {
       ...zone,
       areaM2,
+      perimeterM,
       propertyIds: insideProps.map((p) => p.id),
       updatedAt: new Date().toISOString(),
     };
   });
+}
+
+/**
+ * Determines if a property matches the given property filters.
+ */
+export function matchesPropertyFilters(
+  prop: MapProperty,
+  filters: PropertyFilterState,
+  zones: StrategicZone[]
+): boolean {
+  const conditions: boolean[] = [];
+
+  // 1. Property Type
+  if (filters.propertyTypes.length > 0) {
+    conditions.push(filters.propertyTypes.includes(prop.propertyType));
+  }
+
+  // 2. Transaction Type
+  if (filters.transactionType !== "ALL") {
+    if (filters.transactionType === "SALE") {
+      conditions.push(prop.transactionType.includes("SALE"));
+    } else if (filters.transactionType === "RENTAL") {
+      conditions.push(prop.transactionType.includes("RENTAL"));
+    } else if (filters.transactionType === "BOTH") {
+      conditions.push(prop.transactionType.includes("SALE") && prop.transactionType.includes("RENTAL"));
+    }
+  }
+
+  // 3. Price Range
+  if (filters.minPrice !== null) {
+    conditions.push(prop.price >= filters.minPrice);
+  }
+  if (filters.maxPrice !== null) {
+    conditions.push(prop.price <= filters.maxPrice);
+  }
+
+  // 4. Surface Range
+  if (filters.minSurface !== null) {
+    conditions.push((prop.surface || 0) >= filters.minSurface);
+  }
+  if (filters.maxSurface !== null) {
+    conditions.push((prop.surface || 0) <= filters.maxSurface);
+  }
+
+  // 5. Status
+  if (filters.statuses.length > 0) {
+    conditions.push(filters.statuses.includes(prop.status));
+  }
+
+  // 6. Neighborhood
+  if (filters.neighborhood) {
+    conditions.push(
+      prop.neighborhood.toLowerCase().includes(filters.neighborhood.toLowerCase()) ||
+        prop.address.toLowerCase().includes(filters.neighborhood.toLowerCase())
+    );
+  }
+
+  // 7. Strategic Zone Containment
+  if (filters.strategicZoneId) {
+    const targetZone = zones.find((z) => z.id === filters.strategicZoneId);
+    if (targetZone && prop.latitude !== undefined && prop.longitude !== undefined) {
+      const pt = turf.point([prop.longitude, prop.latitude]);
+      const inside = turf.booleanPointInPolygon(pt, targetZone.geometry);
+      conditions.push(inside);
+    } else {
+      conditions.push(false);
+    }
+  }
+
+  // 8. Legal Status
+  if (filters.legalStatuses.length > 0) {
+    conditions.push(filters.legalStatuses.includes(prop.legalStatus));
+  }
+
+  if (conditions.length === 0) return true;
+
+  if (filters.logicalOperator === "OR") {
+    return conditions.some(Boolean);
+  }
+
+  return conditions.every(Boolean);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -491,9 +779,11 @@ export function synchronizeZonesWithProperties(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STORAGE_KEYS = {
-  PROPERTIES: "realtoros_map_properties_v1",
-  ZONES: "realtoros_strategic_zones_v1",
-  SETTINGS: "realtoros_map_settings_v1",
+  PROPERTIES: "realtoros_map_properties_v2",
+  ZONES: "realtoros_strategic_zones_v2",
+  SETTINGS: "realtoros_map_settings_v2",
+  LOCATION_HISTORY: "realtoros_location_history_v2",
+  FILTER_PRESETS: "realtoros_filter_presets_v2",
 };
 
 export function loadSavedProperties(): MapProperty[] {
@@ -501,7 +791,8 @@ export function loadSavedProperties(): MapProperty[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PROPERTIES);
     if (!raw) return INITIAL_MAP_PROPERTIES;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_MAP_PROPERTIES;
   } catch {
     return INITIAL_MAP_PROPERTIES;
   }
@@ -521,7 +812,8 @@ export function loadSavedZones(): StrategicZone[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.ZONES);
     if (!raw) return INITIAL_STRATEGIC_ZONES;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_STRATEGIC_ZONES;
   } catch {
     return INITIAL_STRATEGIC_ZONES;
   }
@@ -553,5 +845,71 @@ export function saveWorkspaceSettingsToStorage(settings: MapWorkspaceSettings): 
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
   } catch (err) {
     console.error("Failed to save workspace settings to storage:", err);
+  }
+}
+
+export function loadLocationHistory(): PropertyLocationHistory[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.LOCATION_HISTORY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function recordLocationChange(entry: PropertyLocationHistory): void {
+  if (typeof window === "undefined") return;
+  try {
+    const current = loadLocationHistory();
+    const updated = [entry, ...current].slice(0, 100); // keep last 100 history items
+    localStorage.setItem(STORAGE_KEYS.LOCATION_HISTORY, JSON.stringify(updated));
+  } catch (err) {
+    console.error("Failed to record location change:", err);
+  }
+}
+
+export interface SavedFilterPreset {
+  id: string;
+  name: string;
+  filter: PropertyFilterState;
+}
+
+export function loadSavedFilterPresets(): SavedFilterPreset[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.FILTER_PRESETS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveFilterPreset(name: string, filter: PropertyFilterState): SavedFilterPreset[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const current = loadSavedFilterPresets();
+    const newPreset: SavedFilterPreset = {
+      id: `filter-${Date.now()}`,
+      name,
+      filter,
+    };
+    const updated = [newPreset, ...current];
+    localStorage.setItem(STORAGE_KEYS.FILTER_PRESETS, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [];
+  }
+}
+
+export function deleteFilterPreset(presetId: string): SavedFilterPreset[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const current = loadSavedFilterPresets();
+    const updated = current.filter((p) => p.id !== presetId);
+    localStorage.setItem(STORAGE_KEYS.FILTER_PRESETS, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [];
   }
 }

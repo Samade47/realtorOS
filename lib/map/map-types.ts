@@ -1,7 +1,7 @@
 /**
  * RealtorOS Morocco — Market Explorer (Map) Types
  * Definitive specifications for geospatial entities, interactive vector map controls,
- * strategic zoning, and property spatial indexing.
+ * strategic zoning, clustering, property anchors, and spatial analytics.
  */
 
 import { DemoProperty } from "@/lib/data/demo-data";
@@ -13,7 +13,10 @@ export type ZoneCategory =
   | "affordable_investment"
   | "commercial_opportunities"
   | "prospecting_priority"
+  | "development_zone"
   | "custom";
+
+export type ZonePriority = "low" | "medium" | "high" | "critical";
 
 export interface ZoneCategoryMeta {
   id: ZoneCategory;
@@ -60,6 +63,12 @@ export const ZONE_CATEGORIES: ZoneCategoryMeta[] = [
     description: "Périmètres ciblés pour mandats exclusifs et recherche foncière active.",
   },
   {
+    id: "development_zone",
+    label: "Zone de développement",
+    defaultColor: "#d97706", // Warm amber
+    description: "Secteurs en cours d'urbanisation, nouvelles voiries et projets d'aménagement.",
+  },
+  {
     id: "custom",
     label: "Zone personnalisée",
     defaultColor: "#475569", // Slate
@@ -67,12 +76,21 @@ export const ZONE_CATEGORIES: ZoneCategoryMeta[] = [
   },
 ];
 
-export interface MapProperty extends DemoProperty {
+export interface MapProperty extends Omit<DemoProperty, "propertyType" | "status" | "furnished" | "condition"> {
+  propertyType: "APARTMENT" | "VILLA" | "HOUSE" | "COMMERCIAL" | "LAND" | "OFFICE" | "STUDIO" | "DUPLEX" | "RIAD" | "OTHER" | string;
+  status: "NEW" | "ACTIVE" | "RESERVED" | "UNDER_NEGOTIATION" | "SOLD" | "RENTED" | "WITHDRAWN" | "EXPIRED" | string;
   latitude?: number;
   longitude?: number;
   locationPrecision?: "exact" | "approximate" | "neighborhood";
   photos?: string[];
   altitude?: number;
+  standing?: "economique" | "moyen_standing" | "haut_standing" | "luxe";
+  ownerPhone?: string;
+  ownerEmail?: string;
+  notes?: string;
+  floor?: number;
+  furnished?: "furnished" | "unfurnished" | "optional";
+  condition?: "new" | "good" | "needs_work";
 }
 
 export interface StrategicZone {
@@ -80,9 +98,11 @@ export interface StrategicZone {
   userId?: string;
   name: string;
   category: ZoneCategory;
+  priority: ZonePriority;
   description?: string;
   geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
   areaM2: number;
+  perimeterM?: number;
   color: string;
   isVisible: boolean;
   tags: string[];
@@ -92,13 +112,57 @@ export interface StrategicZone {
   updatedAt: string;
 }
 
+export interface PropertyLocationHistory {
+  id: string;
+  propertyId: string;
+  propertyTitle: string;
+  propertyRef: string;
+  previousLatitude: number;
+  previousLongitude: number;
+  newLatitude: number;
+  newLongitude: number;
+  distanceMeters: number;
+  reason?: string;
+  changedBy: string;
+  createdAt: string;
+}
+
+export interface PropertyFilterState {
+  propertyTypes: string[];
+  transactionType: "ALL" | "SALE" | "RENTAL" | "BOTH";
+  minPrice: number | null;
+  maxPrice: number | null;
+  minSurface: number | null;
+  maxSurface: number | null;
+  statuses: string[];
+  neighborhood: string | null;
+  strategicZoneId: string | null;
+  legalStatuses: string[];
+  logicalOperator: "AND" | "OR";
+}
+
+export const DEFAULT_PROPERTY_FILTER_STATE: PropertyFilterState = {
+  propertyTypes: [],
+  transactionType: "ALL",
+  minPrice: null,
+  maxPrice: null,
+  minSurface: null,
+  maxSurface: null,
+  statuses: [],
+  neighborhood: null,
+  strategicZoneId: null,
+  legalStatuses: [],
+  logicalOperator: "AND",
+};
+
 export type DrawingMode =
   | "select"
   | "add_property"
   | "draw_polygon"
   | "draw_rectangle"
   | "draw_radius"
-  | "measure";
+  | "measure"
+  | "edit_zone_vertices";
 
 export type MapStyleId = "voyager" | "positron" | "dark" | "satellite";
 
@@ -139,4 +203,20 @@ export interface LocationSearchResult {
 export interface MeasureResult {
   distanceMeters: number;
   points: [number, number][];
+}
+
+export interface ZoneAnalytics {
+  areaM2: number;
+  perimeterM: number;
+  totalProperties: number;
+  exactPropertiesCount: number;
+  approximatePropertiesCount: number;
+  availableCount: number;
+  negotiationCount: number;
+  soldOrRentedCount: number;
+  totalAskingValueMAD: number;
+  averagePricePerM2MAD: number;
+  propertiesByType: Record<string, number>;
+  propertiesByTransaction: Record<string, number>;
+  propertiesList: MapProperty[];
 }

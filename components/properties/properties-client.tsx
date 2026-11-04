@@ -24,10 +24,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SearchInput } from "@/components/ui/search-input";
 import { DEMO_PROPERTIES, DemoProperty } from "@/lib/data/demo-data";
+import { loadSavedProperties } from "@/lib/map/market-explorer-store";
 import { formatMAD } from "@/lib/utils";
 
 export function PropertiesClient() {
-  const [properties, setProperties] = React.useState<DemoProperty[]>(DEMO_PROPERTIES);
+  const [properties, setProperties] = React.useState<DemoProperty[]>(() => loadSavedProperties() as unknown as DemoProperty[]);
   const [search, setSearch] = React.useState("");
   const [selectedType, setSelectedType] = React.useState<string>("ALL");
   const [selectedTransaction, setSelectedTransaction] = React.useState<string>("ALL");
